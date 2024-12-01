@@ -1,4 +1,5 @@
 .venv
 venv
 credentials.json
-token.pickle
+*.pickle
+__pycache__
