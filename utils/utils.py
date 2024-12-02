@@ -12,7 +12,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 def authenticate():
     """Autentica o usuário e retorna o serviço da API do Google Drive."""
-    creds = open_pickle('token.pickle', None)
+    creds = open_pickle('pickle/token.pickle', None)
     
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -25,38 +25,45 @@ def authenticate():
             )
             creds = flow.run_local_server(port=8080)
         
-        save_pickle('token.pickle', creds)
+        save_pickle('pickle/token.pickle', creds)
             
     return build('drive', 'v3', credentials=creds)
 
 
-def download_file(service, file_id, file_name, output_folder, quality = 80):
+def download_file(service, file_id, file_name, output_folder, quality = 65):
     """Faz o download de um arquivo do Google Drive."""
     file_path = os.path.join(output_folder, file_name)
     request = service.files().get_media(fileId=file_id)
     with io.FileIO(file_path, 'wb') as file:
+        print(f"Downloading {file_name}...")
         downloader = MediaIoBaseDownload(file, request)
         done = False
         while not done:
-            status, done = downloader.next_chunk()
-            print(f"Downloading {file_name}: {int(status.progress() * 100)}%")
-    print(f"{file_name} downloaded to {file_path}")
+            status,done = downloader.next_chunk()
+            print(f"Downloading: {int(status.progress() * 100)}%")
     try:
         with Image.open(file_path) as img:
-            compressed_file_path = os.path.join(output_folder, f"compressed_{file_name}")
-            
+            # compressed_file_path = os.path.join(output_folder, f"compressed_{file_name}")
             img = img.convert("RGB") 
-            img.save(compressed_file_path, "JPEG", quality=quality)
-            print(f"{file_name} compactada e salva em {compressed_file_path}")
+            img.save(file_path, "JPEG", quality=quality)
+            print(f"{file_name} compactada e salva")
+            
+        # os.remove(file_path)
+        
     except Exception as e:
-        print(f"Erro ao compactar {file_name}: {e}")
+        return
 
 
 def choose_download_folder():
     """Permite ao usuário escolher o diretório de download."""
     folder_selected = askdirectory(title="Selecione a pasta para salvar os arquivos")
     return folder_selected if folder_selected != '' else None
-    
+
+
+def get_folder_name(service, folder_id):
+    """Obtém o nome da pasta no Google Drive usando o ID da pasta."""
+    file = service.files().get(fileId=folder_id, fields="name").execute()
+    return file.get('name')    
 
 
 def list_files_in_folder(service, folder_id):
@@ -110,42 +117,26 @@ def list_root_files(service):
     return files
 
 
-# def filter_by_type(file):
-#     types = ['application/vnd.google-apps.folder',
-#                 'application/x-compressed',
-#                 'application/x-zip-compressed',
-#                 'image/png', 'image/jpeg', 'image/jpg']
-    
-#     if file['mimeType'] in types:
-#         return True
-#     return False
-
-
 def sort_files_by_type(files):
     files_sorted = []
     for file in files:
         if file['mimeType'] == 'application/vnd.google-apps.folder':
-            files_sorted.insert(0, file)
-        
-        elif file['mimeType'] in ['application/x-compressed', 'application/x-zip-compressed']:
-            files_sorted.insert(0, file)
-        
-        elif file['mimeType'] in ['image/png', 'image/jpeg', 'image/jpg']:
             files_sorted.append(file)
+        else:
+            files_sorted.insert(0, file)
+        
     return files_sorted
 
 
 def print_files(files):
     for idx, file in enumerate(files, start=1):
         if file['mimeType'] == 'application/vnd.google-apps.folder':
-            print(f"[{str(idx).zfill(2)}] FOLDER: {file['name']}")
-        elif file['mimeType'] in ['application/x-compressed', 'application/x-zip-compressed']:
-            print(f"[{str(idx).zfill(2)}] ZIP: {file['name']}")
+            print(f"{idx:>3}. FOLDER: {file['name']}")
         else:
-            print(f"[{str(idx).zfill(2)}] {file['mimeType'].split('/')[1].upper()}: {file['name']}")
+            print(f"{idx:>3}. IMG: {file['name']}")
 
             
-def open_pickle(file_path, default):
+def open_pickle(file_path, default = None):
     try:
         with open(file_path, 'rb') as file:
             return pickle.load(file)
