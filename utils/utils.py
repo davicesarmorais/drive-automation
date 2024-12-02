@@ -1,3 +1,4 @@
+import time
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -7,6 +8,10 @@ import subprocess
 import platform
 from tkinter.filedialog import askdirectory
 from PIL import Image
+from multiprocessing import Pool
+import keyboard
+
+
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
@@ -32,6 +37,7 @@ def authenticate():
 
 def download_file(service, file_id, file_name, output_folder, quality = 65):
     """Faz o download de um arquivo do Google Drive."""
+
     file_path = os.path.join(output_folder, file_name)
     request = service.files().get_media(fileId=file_id)
     with io.FileIO(file_path, 'wb') as file:
@@ -40,18 +46,30 @@ def download_file(service, file_id, file_name, output_folder, quality = 65):
         done = False
         while not done:
             status,done = downloader.next_chunk()
-            print(f"Downloading: {int(status.progress() * 100)}%")
+            print(f"Downloading {file_name}: {int(status.progress() * 100)}%")
+        print(f"Download de {file_name} concluido")
+
     try:
         with Image.open(file_path) as img:
-            # compressed_file_path = os.path.join(output_folder, f"compressed_{file_name}")
             img = img.convert("RGB") 
             img.save(file_path, "JPEG", quality=quality)
             print(f"{file_name} compactada e salva")
-            
-        # os.remove(file_path)
         
-    except Exception as e:
+    except Exception:
         return
+
+
+def download_files(service, files_sorted, output_folder):
+    with Pool(4) as pool:
+        for file in files_sorted:
+            if file['mimeType'] != 'application/vnd.google-apps.folder':
+                pool.apply_async(download_file, (service, file['id'], file['name'], output_folder))
+           
+        while True:
+            if keyboard.is_pressed('q'):
+                pool.terminate()    
+                return
+            time.sleep(0.05)
 
 
 def choose_download_folder():

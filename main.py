@@ -1,14 +1,13 @@
 from utils.utils import *
 from utils.stack import Stack
 
-
 def menu(service, folder_id, output_folder):
     if folder_id is None:
         folder_name = "Raiz"
     else:
         folder_name = get_folder_name(service, folder_id)
     
-    print(f"Pasta onde serão salvos os arquivos: {output_folder}")
+    print(f"Pasta onde os arquivos serão salvos: {output_folder}")
     print(f"Pasta atual do drive: {folder_name}\n")
     print(
         "1. Listar itens da pasta atual do drive",
@@ -20,9 +19,9 @@ def menu(service, folder_id, output_folder):
 
 
 def main():
-    print("Seleciona a pasta que deseja salvar seus arquivos:")
     output_folder = open_pickle('pickle/out_path.pickle', None)
     if output_folder is None:
+        print("Seleciona a pasta que deseja salvar seus arquivos:")
         output_folder = choose_download_folder()
         save_pickle('pickle/out_path.pickle', output_folder)
     
@@ -51,7 +50,7 @@ def main():
                 print_files(files_sorted)
                 print("\n[0] Voltar uma pasta")
                 print("[Q] Sair")
-                print("[A] Baixar todos os arquivos")
+                print("[A] Baixar todos os arquivos (aperte 'q' para cancelar os downloads em andamento)")
                 indice = input("> ").lower()
                 
                 if indice == 'q':
@@ -66,10 +65,8 @@ def main():
                         print("Nenhuma pasta selecionada para salvar os arquivos.")
                         input("Aperte enter para voltar...")
                         break
-                    
-                    for file in files_sorted:
-                        if file['mimeType'] != 'application/vnd.google-apps.folder':
-                            download_file(service, file['id'], file['name'], output_folder)
+               
+                    download_files(service, files_sorted, output_folder)
                     continue
                 
                 if indice == '0':
@@ -106,6 +103,7 @@ def main():
             choose = choose_download_folder()
             if choose is not None:
                 output_folder = choose
+                save_pickle('pickle/out_path.pickle', output_folder)
             
             
         elif choice == '3':
