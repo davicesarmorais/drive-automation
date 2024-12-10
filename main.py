@@ -1,6 +1,7 @@
 from utils.utils import *
 from utils.stack import Stack
 
+
 def menu(service, folder_id, output_folder):
     if folder_id is None:
         folder_name = "Raiz"
@@ -20,19 +21,16 @@ def menu(service, folder_id, output_folder):
 
 def main():
     output_folder = open_pickle('pickle/out_path.pickle', None)
-    if output_folder is None:
-        print("Seleciona a pasta que deseja salvar seus arquivos:")
-        output_folder = choose_download_folder()
-        save_pickle('pickle/out_path.pickle', output_folder)
-    
+    verify_output_folder(output_folder)
     folder_stack = open_pickle('pickle/folders.pickle', Stack())
     service = authenticate()
     
     while True:
         folder_id = folder_stack.peek()
+        verify_output_folder(output_folder)
         clear()
         menu(service, folder_id, output_folder)
-        choice = input("Escolha uma opção: ")
+        choice = input("Escolha uma opção: ").strip()
 
         if choice == '1':        
             while True:
@@ -48,54 +46,55 @@ def main():
                 clear()
                 print(f"Listando arquivos na pasta {folder_name} do Drive...\n")
                 print_files(files_sorted)
-                print("\n[0] Voltar uma pasta")
-                print("[Q] Sair")
-                print("[A] Baixar todos os arquivos (aperte 'q' para cancelar os downloads em andamento)")
-                indice = input("> ").lower()
+                print(
+                    "\n[0] Voltar uma pasta",
+                    "[Q] Sair",
+                    "[A] Baixar todos os arquivos (aperte 'q' para cancelar os downloads em andamento)",
+                    sep="\n"
+                )
+                indice = input("> ").lower().strip()
                 
                 if indice == 'q':
                     break
                 
                 elif indice == 'a':
-                    if output_folder is None:
-                        output_folder = choose_download_folder()
-                        save_pickle('pickle/out_path.pickle', output_folder)
-                    
+                    # Verifica se há uma pasta selecionada para salvar os arquivos
+                    verify_output_folder(output_folder)
+                    # Se o usuário escolher cancelar os downloads, ele volta para o menu principal
                     if output_folder is None:
                         print("Nenhuma pasta selecionada para salvar os arquivos.")
                         input("Aperte enter para voltar...")
                         break
-               
-                    download_files(service, files_sorted, output_folder)
-                    continue
                 
-                if indice == '0':
+                    download_files(service, files_sorted, output_folder)
+                
+                elif indice == '0':
                     folder_stack.pop()
                     folder_id = folder_stack.peek()
                     save_pickle('pickle/folders.pickle', folder_stack)
-                    continue
                 
-                try:
-                    file = files_sorted[int(indice) - 1]
-                except (IndexError, ValueError):
-                    continue
-                
-                if file['mimeType'] == 'application/vnd.google-apps.folder':
-                    folder_stack.push(file['id'])
-                    folder_id = folder_stack.peek()
-                    save_pickle('pickle/folders.pickle', folder_stack)
-                    continue
                 else:
-                    if output_folder is None:
-                        output_folder = choose_download_folder()
-                        save_pickle('pickle/out_path.pickle', output_folder)
+                    try:
+                        file = files_sorted[int(indice) - 1]
+                    except (IndexError, ValueError):
+                        continue
                     
-                    if output_folder is None:
-                        print("Nenhuma pasta selecionada para salvar os arquivos.")
-                        input("Aperte enter para voltar...")
-                        break
+                    if is_folder(file):
+                        folder_stack.push(file['id'])
+                        folder_id = folder_stack.peek()
+                        save_pickle('pickle/folders.pickle', folder_stack)
                     
-                    download_file(service, file['id'], file['name'], output_folder)
+                    else:
+                        # Verifica se há uma pasta selecionada para salvar os arquivos
+                        verify_output_folder(output_folder)
+                        
+                        # Se o usuário escolher cancelar os downloads, ele volta para o menu principal
+                        if output_folder is None:
+                            print("Nenhuma pasta selecionada para salvar os arquivos.")
+                            input("Aperte enter para voltar...")
+                            break
+                        
+                        download_file(service, file['id'], file['name'], output_folder)
 
             
         elif choice == '2':
