@@ -1,35 +1,44 @@
-import sys
-import time
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
-import os, io, pickle
+import os, time
+import io, pickle
 import subprocess
 import platform
 from tkinter.filedialog import askdirectory
 from PIL import Image
 from multiprocessing import Pool
-if platform.system() == 'Windows':
-    import msvcrt
-else:
-    import termios
-    import tty
+import threading
+from pynput import keyboard
 
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
-def authenticate():
+
+def count_down(timeout, stop_event):
+    for i in range(timeout, -1, -1):
+        if stop_event.is_set():
+            print()
+            clear()
+            break
+        time.sleep(1)
+        print(f"Tempo restante: {i:2d}", end='\r')
+
+        
+def authenticate(change_account=False):
     """Autentica o usuário e retorna o serviço da API do Google Drive."""
-    creds = open_pickle('pickle/token.pickle', None)
+    creds = open_pickle('token.pickle', None)
+    if change_account:
+        creds = None    
     
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
             except RefreshError:
-                save_pickle('pickle/token.pickle', None)
+                save_pickle('token.pickle', None)
                 return authenticate()
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
@@ -37,9 +46,25 @@ def authenticate():
                 SCOPES,
                 redirect_uri='http://localhost:58273/' 
             )
-            creds = flow.run_local_server(port=58273)
-            
-        save_pickle('pickle/token.pickle', creds)
+
+            try:
+                timout = 20
+                stop_event = threading.Event()
+                thread = threading.Thread(target=count_down, args=(timout, stop_event))
+                thread.start()
+                
+                creds = flow.run_local_server(
+                    port=58273,
+                    timeout_seconds=timout,
+                    access_type='offline'
+                )
+            except Exception:
+                return None
+            finally:
+                stop_event.set()
+                thread.join()
+        
+        save_pickle('token.pickle', creds)
             
     return build('drive', 'v3', credentials=creds)
 
@@ -67,33 +92,50 @@ def download_file(service, file_id, file_name, output_folder, quality = 65):
     except Exception:
         return
 
-def tecla_pressionada():
-    if platform.system() == 'Windows':
-        # Windows version using msvcrt
-        return msvcrt.getch().decode()  # msvcrt.getch() returns a byte, so we decode it to string
-    else:
-        # Unix-like systems (Linux/macOS) version using termios and tty
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            ch = sys.stdin.read(1)
-            return ch
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-def download_files(service, files_sorted, output_folder):
+stop_loop = False
+
+def on_press(key):
+    global stop_loop
+    try:
+        if key.char == 'q':
+            stop_loop = True
+    except AttributeError:
+        pass  # Ignora outras teclas que não são caracteres
+
+
+def remove_empty_files(output_folder):
+    for filename in os.listdir(output_folder):
+        file_path = os.path.join(output_folder, filename)
+        if os.path.isfile(file_path) and os.path.getsize(file_path) == 0:
+            os.remove(file_path)
+
+
+def download_files(service, files, output_folder):
+    global stop_loop
     with Pool(4) as pool:
-        for file in files_sorted:
-            if not is_folder(file):
-                pool.apply_async(download_file, (service, file['id'], file['name'], output_folder))
-           
-        while True:
-            # if keyboard.is_pressed('q'):
-            if tecla_pressionada() == 'q':
-                pool.terminate()    
-                return
-            time.sleep(0.05)
+        files_to_download = [(service, file['id'], file['name'], output_folder) for file in files if not is_folder(file)]
+        listener = keyboard.Listener(on_press=on_press)
+        listener.start()
+        results = pool.starmap_async(download_file, files_to_download)
+        
+        while not results.ready():
+            if stop_loop:
+                listener.stop()
+                print("Cancelando downloads aguarde.")
+                pool.terminate()
+                pool.join()
+                stop_loop = False
+                break
+            time.sleep(0.1)  # Pequena pausa para evitar consumo excessivo de CPU
+
+        if results.ready():
+            print("Todos os downloads foram concluídos.")
+            pool.close()
+            pool.join()
+            listener.stop()
+
+        remove_empty_files(output_folder)
 
 def output_folder_exists(output_folder):
     return os.path.exists(output_folder)
@@ -123,6 +165,7 @@ def list_files_in_folder(service, folder_id):
     while True:
         response = service.files().list(
             q=query,
+            orderBy="viewedByMeTime asc, name",
             fields="nextPageToken, files(id, name, mimeType)",
             pageToken=page_token
         ).execute()
@@ -139,8 +182,7 @@ def list_files_in_folder(service, folder_id):
 def list_root_files(service):
     query = (
         "trashed = false and "
-        "(mimeType = 'application/vnd.google-apps.folder' or "
-        "mimeType contains 'image/')"
+        "mimeType = 'application/vnd.google-apps.folder'"
     )
     files = []
     page_token = None
@@ -148,6 +190,7 @@ def list_root_files(service):
     while True:
         response = service.files().list(
             q=query,
+            orderBy="viewedByMeTime asc, name",
             fields="nextPageToken, files(id, name, mimeType)",
             pageToken=page_token
         ).execute()
@@ -180,16 +223,24 @@ def print_files(files):
             print(f"{idx:>3}. IMG: {file['name']}")
 
             
-def open_pickle(file_path, default = None):
+def open_pickle(file_name, default = None):
+    DIRETORIO_PROJETO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if not os.path.exists(os.path.join(DIRETORIO_PROJETO, 'pickle')):
+        os.mkdir(os.path.join(DIRETORIO_PROJETO, 'pickle'))
+    path = os.path.join(DIRETORIO_PROJETO, 'pickle', file_name)
     try:
-        with open(file_path, 'rb') as file:
+        with open(path, 'rb') as file:
             return pickle.load(file)
     except FileNotFoundError:
         return default
 
     
-def save_pickle(file_path, data):
-    with open(file_path, 'wb') as file:
+def save_pickle(file_name, data):
+    DIRETORIO_PROJETO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if not os.path.exists(os.path.join(DIRETORIO_PROJETO, 'pickle')):
+        os.mkdir(os.path.join(DIRETORIO_PROJETO, 'pickle'))
+    path = os.path.join(DIRETORIO_PROJETO, 'pickle', file_name)
+    with open(path, 'wb') as file:
         pickle.dump(data, file)
         
         
@@ -205,7 +256,7 @@ def verify_output_folder(output_folder):
     if output_folder is None or not output_folder_exists(output_folder):
         print("Seleciona a pasta que deseja salvar seus arquivos:")
         output_folder = choose_download_folder()
-        save_pickle('pickle/out_path.pickle', output_folder)
+        save_pickle('out_path.pickle', output_folder)
     
     return output_folder
 
