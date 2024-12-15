@@ -7,7 +7,7 @@
 5. Instale as dependências: `pip install -r requirements.txt`
 
 
-- Windows: `python main.py`
-- Linux: `python3 main.py`
+- Windows: `python drive.py`
+- Linux: `python3 drive.py`
 
 *Dependendo do usuário, disponibilizo o arquivo*
