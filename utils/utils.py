@@ -48,7 +48,7 @@ def authenticate(change_account=False):
             )
 
             try:
-                timout = 20
+                timout = 60
                 stop_event = threading.Event()
                 thread = threading.Thread(target=count_down, args=(timout, stop_event))
                 thread.start()
